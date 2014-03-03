@@ -1,0 +1,26 @@
+<html>
+<head>
+  <title>Gulp test</title>
+</head>
+<body>
+
+  <script type="text/javascript" src="dist/sfsb.js"></script>
+  <script type="text/javascript">
+
+    // create a new socket in a worker. url goes to an echo server.
+    var socket = new SFSB('ws://echo.websocket.org', function (data) {
+      return data + ', my good friend.';
+    });
+
+    // when we get a message from the socket/worker, log it.
+    socket.addEventListener('message', function (evt) {
+      console.log('the message was', evt.data);
+    });
+
+    // send "Hello" to the echo server. it should echo hello back.
+    // If our processor kicks in, the full echo should be "Hello, my good friend."
+    socket.send('Hello');
+
+  </script>
+</body>
+</html>
