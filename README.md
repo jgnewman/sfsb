@@ -59,7 +59,7 @@ socket.addEventListener('message', function (evt) {
 The above call registers a function to be run whenever we receive a message
 back from our socket/worker.
 
-At this point we can test whether or not everything is working by send a
+At this point we can test whether or not everything is working by sending a
 message to the socket. Even though the socket is running within a web worker,
 we can interface with it as if it was just a regular socket. We don't have
 to think about the web worker at all.
