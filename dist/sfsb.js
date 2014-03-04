@@ -13,7 +13,7 @@ var global    = window,
  * invoked to process the result. The processed result will then
  * be sent back to our main thread. 
  */
-task  = '(function () {'
+task  = 'function () {'
 
            /*
             * Create a new WebSocket and track its original send method.
@@ -48,7 +48,7 @@ task  = '(function () {'
       + '  return function (msg) {'
       + '    socket.send(msg);'
       + '  };'
-      + '}())'
+      + '}'
       ;
 
 /**
@@ -76,7 +76,7 @@ function SFSB(url, cb) {
   /*
    * Give the worker its job.
    */
-  worker.postJob(specificTask);
+  worker.postJob(specificTask, true);
 
   /*
    * Store the worker.
@@ -187,17 +187,19 @@ workerBlob = new Blob([fnComponents(workerBody).body], {type: "text/javascript"}
  * `body` - the function body.
  * `params` - an array of parameter name strings.
  *
- * @param {Function} fn - The function to divide up.
+ * @param {Function} fn          - The function to divide up.
+ * @param {Boolean}  isImmediate - If true, the function should be
+ *                                 executed immediately.
  *
  * @returns {Object} - Contains the function components.
  */
-function fnComponents(fn) {
+function fnComponents(fn, isImmediate) {
   var str;
   fn  = (typeof fn === 'function' ? fn.toString() : fn);
-  str = fn.replace(/^\(?function\s*[^\(]*\s*\(/, '');
+  str = fn.replace(/^function\s*[^\(]*\s*\(/, '');
   return {
-    "body"      : str.replace(/^[^\)]*\)\s*\{|\}(\(\)\))?$/g, ''),
-    "immediate" : /\}(\(\)\))?$/.test(fn),
+    "body"      : str.replace(/^[^\)]*\)\s*\{|\}$/g, ''),
+    "immediate" : !!isImmediate,
     "params"    : str.replace(/\s+/g, '')
                      .replace(/\).*$/, '')
                      .split(',')
@@ -260,14 +262,18 @@ function createWorker() {
     /**
      * Allows you to tell a worker how to work.
      *
-     * @param {Function} fn - The worker's body of code.
+     * @param {Function} fn          - The worker's body of code.
+     * @param {Boolean}  isImmediate - If true, the job should be executed
+     *                                 immediately upon transfer. This is
+     *                                 mainly for when your job is actually a closure
+     *                                 that needs to return the real job.
      *
      * @returns - The api.
      */
-    "postJob" : function (fn) {
+    "postJob" : function (fn, isImmediate) {
       worker.postMessage({
         label: 'job',
-        msg: fnComponents(fn)
+        msg: fnComponents(fn, isImmediate)
       });
       return this;
     },

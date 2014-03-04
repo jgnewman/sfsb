@@ -12,7 +12,7 @@ var global    = window,
  * invoked to process the result. The processed result will then
  * be sent back to our main thread. 
  */
-task  = '(function () {'
+task  = 'function () {'
 
            /*
             * Create a new WebSocket and track its original send method.
@@ -47,7 +47,7 @@ task  = '(function () {'
       + '  return function (msg) {'
       + '    socket.send(msg);'
       + '  };'
-      + '}())'
+      + '}'
       ;
 
 /**
@@ -75,7 +75,7 @@ function SFSB(url, cb) {
   /*
    * Give the worker its job.
    */
-  worker.postJob(specificTask);
+  worker.postJob(specificTask, true);
 
   /*
    * Store the worker.
