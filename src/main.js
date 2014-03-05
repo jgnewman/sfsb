@@ -423,6 +423,14 @@ function SFAP(settings) {
 SFAP.prototype = {
 
   /**
+   * Close the worker and by extension, kill the ajax.
+   */
+  "close" : function () {
+    this.worker.close();
+    return this;
+  },
+
+  /**
    * Send a POST request to the poller. Does not interrupt polling.
    * Can not use a different URL than the URL being polled. All other
    * settings may be overwritten.

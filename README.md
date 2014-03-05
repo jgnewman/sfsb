@@ -187,7 +187,6 @@ TODO
 ----
 
 - Periodically refresh ajax workers to clear out memory
-- Add ways to manually kill sockets and ajax workers
 - Maybe add ways to revive dead sockets and ajax workers
 
 
