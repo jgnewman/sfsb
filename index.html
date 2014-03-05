@@ -28,7 +28,8 @@
     // create a new ajax poller in a worker.
     var ajax = new SF.ajaxPoller({
       url: 'http://localhost:8080/index.html',
-      frequency: 5000,
+      frequency: 3000,
+      refresh: 3,
 
       // the process function is run on the worker side and will
       // process the successful data before it gets passed back

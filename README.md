@@ -186,7 +186,7 @@ next poll.
 TODO
 ----
 
-- Periodically refresh ajax workers to clear out memory
+- Update readme with worker refresh
 - Maybe add ways to revive dead sockets and ajax workers
 
 

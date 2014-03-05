@@ -242,13 +242,41 @@ function createXHR(settings) {
   });
 
   /*
-   * The purpose of this worker is to continue to poll the server
-   * every so often so, if this wasn't a PUT/POST/DELETE, countdown
-   * and then make another request.
+   * If we are currently doing a polling request...
    */
-  return method === "GET" && setTimeout(function () {
-    createXHR(settings);
-  }, settings.frequency || 30000);
+  if (method === 'GET') {
+
+    /*
+     * Increment the req count
+     */
+    reqCount += 1;
+
+    /*
+     * The purpose of this worker is to continue to poll the server
+     * every so often so, if this wasn't a PUT/POST/DELETE, countdown
+     * and then make another request.
+     */
+    return setTimeout(function () {
+
+      /*
+       * Reset the reqCount if we make it to our
+       * refresh limit. Next, send ourselves the "refresh"
+       * message so that this worker can be terminated and
+       * started up again.
+       */
+      if (reqCount >= refresh) {
+        reqCount = 0;
+        self.postMessage({"result" : "refresh"});
+      
+      /*
+       * If we're not at our refresh limit, just make
+       * another request.
+       */
+      } else {
+        createXHR(settings);
+      }
+    }, settings.frequency || 30000);
+  }
 }
 
 /**
@@ -261,8 +289,10 @@ function createXHR(settings) {
  */
 pltask = 'function () {'
 
-       + '  var globals = {{GLOBALS}},'
-       + '      process = {{PROCESS}};'
+       + '  var globals  = {{GLOBALS}},'
+       + '      process  = {{PROCESS}},'
+       + '      refresh  = {{REFRESH}},'
+       + '      reqCount = 0;'
 
             /*
              * Make sure ajax workers can use our stringify function.
@@ -392,7 +422,7 @@ SFSB.prototype = {
    * Close the worker and by extension the socket.
    */
   "close" : function () {
-    this.worker.close();
+    this.worker.end();
     return this;
   },
 
@@ -417,6 +447,7 @@ SFSB.prototype = {
  * @key {Object}   data      - Data to send with GET requests.
  * @key {Number}   timeout   - How long before the request gives up. Defaults to 10000.
  * @key {Number}   frequency - How often to poll the server. Defaults to 30000.
+ * @key {Number}   refresh   - How many requests to make before refreshing the worker.
  * @key {Function} process   - A function for processing successful data.
  * @key {Object}   headers   - Defaults to native defaults. Should
  *                             be in the format of {contentType: 'text/plain'}
@@ -424,7 +455,7 @@ SFSB.prototype = {
  * @returns {undefined}
  */
 function SFAP(settings) {
-  var worker, specificTask;
+  var worker, specificTask, messageListener, errorListener;
 
   /*
    * Don't let users poll with posts, etc.
@@ -436,7 +467,8 @@ function SFAP(settings) {
    */
   worker       = secretary();
   specificTask = pltask.replace('{{GLOBALS}}', JSON.stringify(settings))
-                       .replace('{{PROCESS}}', settings.process ? settings.process.toString() : 'null');
+                       .replace('{{PROCESS}}', settings.process ? settings.process.toString() : 'null')
+                       .replace('{{REFRESH}}', settings.refresh ? settings.refresh : 100);
 
   /*
    * Give the worker its job.
@@ -444,30 +476,57 @@ function SFAP(settings) {
   worker.postJob(specificTask, true);
 
   /*
+   * Define a function for handling messages from the worker.
+   */
+  messageListener = function (msg) {
+    if (msg.data.result === 'refresh') {
+      this.refresh();
+    } else {
+      this['on' + msg.data.result].forEach(function (callback) {
+        callback(msg.data);
+      });
+      this.onmessage.forEach(function (callback) { callback(msg.data) });
+    }
+  }.bind(this);
+
+  /*
+   * Define a funciton for handling errors from the worker.
+   */
+  errorListener = function (msg) {
+    var toPass = {"result" : "error", "response" : msg, "status" : -1};
+    this.onerror.forEach(function (callback) { callback(toPass) });
+    this.onmessage.forEach(function (callback) { callback(toPass) });
+  }.bind(this);
+
+  /*
+   * Define a function for refreshing a worker.
+   */
+  this.refresh = function () {
+    this.worker.end();
+    this.worker = secretary();
+    this.worker.postJob(this.task, true);
+    this.worker.addListener('message', messageListener);
+    this.worker.addListener('error', errorListener);
+    console.log('got here')
+  };
+
+  /*
    * Add a message event listener. When we get a message back from the worker,
    * invoke all callbacks for that kind of message.
    */
-  worker.addListener('message', function (msg) {
-    this['on' + msg.data.result].forEach(function (callback) {
-      callback(msg.data);
-    });
-    this.onmessage.forEach(function (callback) { callback(msg.data) });
-  }.bind(this));
+  worker.addListener('message', messageListener);
 
   /*
    * Add an error event listener. When the worker reports an error, invoke
    * error callbacks.
    */
-  worker.addListener('error', function (msg) {
-    var toPass = {"result" : "error", "response" : msg, "status" : -1};
-    this.onerror.forEach(function (callback) { callback(toPass) });
-    this.onmessage.forEach(function (callback) { callback(toPass) });
-  });
+  worker.addListener('error', errorListener);
 
   /*
    * Store the worker and other important info.
    */
   this.worker    = worker;
+  this.task      = specificTask;
   this.settings  = settings;
   this.onsuccess = [];
   this.onerror   = [];
@@ -745,7 +804,9 @@ function createWorker() {
     "end" : function (time) {
       var closed = false;
       this.addListener('close', function () { closed = true });
-      setTimeout(function () { !closed && worker.terminate() }, 100 || time);
+      setTimeout(function () {
+        !closed && worker.terminate();
+      }, 100 || time);
       this.postCmd(function () { self.close() });
     }
   };

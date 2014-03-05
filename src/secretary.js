@@ -202,7 +202,9 @@ function createWorker() {
     "end" : function (time) {
       var closed = false;
       this.addListener('close', function () { closed = true });
-      setTimeout(function () { !closed && worker.terminate() }, 100 || time);
+      setTimeout(function () {
+        !closed && worker.terminate();
+      }, 100 || time);
       this.postCmd(function () { self.close() });
     }
   };
