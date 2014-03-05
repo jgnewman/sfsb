@@ -7,19 +7,40 @@
   <script type="text/javascript" src="dist/sfsb.js"></script>
   <script type="text/javascript">
 
+    /********** TEST SOCKETS ***********/
+
     // create a new socket in a worker. url goes to an echo server.
-    var socket = new SFSB('ws://echo.websocket.org', function (data) {
+    var socket = new SF.socketBooster('ws://echo.websocket.org', function (data) {
       return data + ', my good friend.';
     });
 
     // when we get a message from the socket/worker, log it.
     socket.addEventListener('message', function (evt) {
-      console.log('the message was', evt.data);
+      console.log('the websocket message was', evt.data);
     });
 
     // send "Hello" to the echo server. it should echo hello back.
     // If our processor kicks in, the full echo should be "Hello, my good friend."
     socket.send('Hello');
+
+    /********** TEST AJAX ***********/
+
+    // create a new ajax poller in a worker.
+    var ajax = new SF.ajaxPoller({
+      url: 'http://localhost:8080/index.html',
+      frequency: 5000,
+
+      // the process function is run on the worker side and will
+      // process the successful data before it gets passed back
+      process: function (data) {
+        return 'Hello, ' + data;
+      }
+    });
+
+    // when the ajax poller has data, it sends it back to us
+    ajax.addEventListener('success', function (data) {
+      console.log('the ajax data was', data.response.replace(/\s+/g, '').slice(0, 50) + '...');
+    });
 
   </script>
 </body>
