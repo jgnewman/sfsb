@@ -114,10 +114,12 @@ var ajax = new SF.ajaxPoller({
 });
 ```
 
-In this example we can see all of our available options. Because you are polling
-the server for updates, there is no need to specify the request method. It will
-be "GET" by default. Following are the meanings of each setting. Note that
-only `url` is required. All others are optional.
+In this example we can see almost all of our available options. The two options
+not shown are called `backoff` and `refresh` but we'll get to those later.
+Anyway, because you are polling the server for updates, there is no need to
+specify the request method. It will be "GET" by default. Following are the
+meanings of each setting. Note that only `url` is required. All others are
+optional.
 
 - `url` - The url of the server where requests will be made.
 - `timeout` - How long any given request should wait before timing out. The
@@ -140,7 +142,7 @@ ajax poller:
 
 ```javascript
 ajax.addEventListener('success', function (data) {
-  console.log('I received:', data);
+  console.log('I received:', data.response);
 });
 ```
 
@@ -183,10 +185,88 @@ returns fairly quickly, your success listeners will pick up on the response
 from that POST and then 15 seconds later, pick up on the response from the
 next poll.
 
+#### Incremental Backoff
+
+Now let's say you didn't need to poll the server exactly once every X seconds.
+For various reasons, you might want to be able to control the amount of time
+between polls based, for example, on the information you received from a
+previous request.
+
+In this case, you have the option of passing in a function for your
+`backoff` setting. This function will take the same response data that ends
+up getting sent back to the main thread and ought to return a number in
+milliseconds. This number will be used as the length of time to wait before
+making the next ajax poll. For example:
+
+```javascript
+var ajax = new SF.ajaxPoller({
+  url: 'http://www.example.com',
+  frequency: 3000,
+  backoff: function (data) {
+    return data.prevFreq + 5000;
+  }
+});
+```
+
+In this case, every time a failed response comes back, our frequency function
+will run. Within the data it receives is a value representing how long the
+worker waited before making the previous poll. So in the event of a failed
+response, we'll wait that long plus 5 additional seconds before making the
+next poll. As soon as the response comes back successfully, our initial
+frequency setting will kick back in at `3000` where it will remain until we
+get another failed response.
+
+Here is all the data available both within a backoff function and within
+your success, error, and message listeners:
+
+- `success` - _Boolean._ Whether or not the request was successful.
+- `response` - _String._ The response text.
+- `status` - _Number._ The xhr status code.
+- `prevFreq` - _Number._ The length of the delay before making this request.
+- `duration` - _Number._ The amount of time it took for the request to complete.
+- `utf8Bytes` - _Number._ Assuming the response text is utf-8, the byte size of
+the response text.
+
+#### Refreshing
+
+Constant polling can be a taxing job. Even with incremental backoff, there are
+certain occasions where it is useful to clear out the memory accumulated by a
+polling mechanism and its associated call stack. That's what your `refresh`
+setting is for. If you would like, you can tell your ajax poller that after
+every X number of requests, the web worker should destroy itself, thus cleaning
+out memory and such, and then re-initialize itself with all of the same settings
+that were initially passed in. For example:
+
+```javascript
+var ajax = new SF.ajaxPoller({
+  url: 'http://www.example.com',
+  frequency: 3000,
+  refresh: 100
+});
+
+ajax.addEventListener('success', function (data) {
+  console.log('I run when we have success!')
+});
+```
+
+In this example, we tell our ajax poller that after making 100 requests, it
+should refresh itself. Being an obedient little worker, it will count how many
+requests it makes and, when it gets to 100, it will destroy itself and then
+spin up another web worker with all the same settings to take its place.
+
+The implication there is that your new worker will also have a request limit
+set to 100 so that the refreshing cycle can continue. It is also important to
+note that the event listener you created in connection with your original worker
+now automatically applies to your new worker instead. Again, this is an instance
+where you shouldn't have to think about the worker at all, just the polling
+that takes place.
+
+
 TODO
 ----
 
-- Update readme with worker refresh
+- Way to modify polling request data
+- Test with the minified file
 - Maybe add ways to revive dead sockets and ajax workers
 
 

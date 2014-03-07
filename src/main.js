@@ -76,7 +76,6 @@ function stringify(data) {
  * @key {String} type      - The REST method. Defaults to 'GET'.
  * @key {Object} data      - Data to send with the request.
  * @key {Number} timeout   - How long before the request gives up.
- * @key {Number} frequency - How often to poll the server.
  * @key {Object} headers   - Defaults to native defaults. Should
  *                           be in the format of {contentType: 'text/plain'}
  *
@@ -85,6 +84,9 @@ function stringify(data) {
 function createXHR(settings) {
   var req    = new XMLHttpRequest(),
       method = (settings.type ? settings.type.toUpperCase() : 'GET'),
+      duration,
+      always,
+      nextTimeout,
       url,
       data,
       timer;
@@ -126,6 +128,11 @@ function createXHR(settings) {
     });
 
   /*
+   * Start counting request time.
+   */
+  duration = +new Date;
+
+  /*
    * Send the request. Include data if appropriate.
    */
   req.send(method === 'POST' || method === 'DELETE' || method === 'PUT' ? (data || null) : null);
@@ -135,9 +142,13 @@ function createXHR(settings) {
    */
   timer = setTimeout(function () {
     req.abort();
-    self.postMessage({"result"   : "error",
-                      "response" : "timeout",
-                      "status"   : xhr.status});
+    self.postMessage(resData = {"success"   : false,
+                                "response"  : "timeout",
+                                "status"    : xhr.status,
+                                "prevFreq"  : prevFreq || 0,
+                                "duration"  : (+new Date) - duration,
+                                "utf8Bytes" : 0});
+    always(resData);
   }, 10000 || settings.timeout || req.timeout);
 
   /*
@@ -156,70 +167,106 @@ function createXHR(settings) {
      * reject the promise.
      */
     if (status < 200 || status > 299) {
-      self.postMessage({"result"   : "error",
-                        "response" : evt.srcElement.response,
-                        "status"   : evt.srcElement.status});
+      self.postMessage(resData = {"success"   : false,
+                                  "response"  : evt.srcElement.responseText,
+                                  "status"    : evt.srcElement.status,
+                                  "prevFreq"  : prevFreq || 0,
+                                  "duration"  : (+new Date) - duration,
+                                  "utf8Bytes" : byteSize(evt.srcElement.responseText)});
 
     /*
      * In the event of a good result, process that result and hand it back.
      */
     } else {
-      self.postMessage({"result"   : "success",
-                        "response" : (process
-                                        ? process(evt.srcElement.response)
-                                        : evt.srcElement.response),
-                        "status"   : evt.srcElement.status});
+      self.postMessage(resData = {"success"   : true,
+                                  "response"  : (process
+                                                  ? process(evt.srcElement.responseText)
+                                                  : evt.srcElement.responseText),
+                                  "status"    : evt.srcElement.status,
+                                  "prevFreq"  : prevFreq || 0,
+                                  "duration"  : (+new Date) - duration,
+                                  "utf8Bytes" : byteSize(evt.srcElement.responseText)});
 
     }
+
+    always(resData);
   });
 
   /*
-   * If the request errors out, clear the timer and
-   * reject the promise.
+   * If the request errors out, clear the timer, send an error, and potentially
+   * call a backoff function.
    */
   req.addEventListener('error', function (evt) {
     clearTimeout(timer);
-    self.postMessage({"result"   : "error",
-                      "response" : evt.srcElement.response,
-                      "status"   : evt.srcElement.status});
+    self.postMessage(resData = {"success"   : false,
+                                "response"  : evt.srcElement.responseText,
+                                "status"    : evt.srcElement.status,
+                                "prevFreq"  : prevFreq || 0,
+                                "duration"  : (+new Date) - duration,
+                                "utf8Bytes" : byteSize(evt.srcElement.responseText)});
+    always(resData);
   });
 
   /*
-   * If we are currently doing a polling request...
+   * Define a function we will run whenever a request returns if we need to
+   * use that data for a backoff function.
    */
-  if (method === 'GET') {
+  always = function (responseData) {
 
     /*
-     * Increment the req count
+     * If we are currently doing a polling request...
      */
-    reqCount += 1;
-
-    /*
-     * The purpose of this worker is to continue to poll the server
-     * every so often so, if this wasn't a PUT/POST/DELETE, countdown
-     * and then make another request.
-     */
-    return setTimeout(function () {
+    if (method === 'GET') {
 
       /*
-       * Reset the reqCount if we make it to our
-       * refresh limit. Next, send ourselves the "refresh"
-       * message so that this worker can be terminated and
-       * started up again.
+       * Increment the req count if we have been given a
+       * refresh limit.
        */
-      if (reqCount >= refresh) {
-        reqCount = 0;
-        self.postMessage({"result" : "refresh"});
-      
+      haveRefresh && (reqCount += 1);
+
       /*
-       * If we're not at our refresh limit, just make
-       * another request.
+       * Determine how long to wait before polling again.
        */
-      } else {
-        createXHR(settings);
+      if (responseData && backoff) {
+        if (responseData.success) {
+          nextTimeout = prevFreq = frequency;
+        } else {
+          nextTimeout = prevFreq = backoff(responseData);
+        }
       }
-    }, settings.frequency || 30000);
-  }
+
+      /*
+       * The purpose of this worker is to continue to poll the server
+       * every so often so, if this wasn't a PUT/POST/DELETE, countdown
+       * and then make another request.
+       */
+      return setTimeout(function () {
+
+        /*
+         * If we make it to our
+         * refresh limit, send ourselves the "refresh"
+         * message so that this worker can be terminated and
+         * started up again.
+         */
+        if (haveRefresh && reqCount >= refresh) {
+          self.postMessage({"refresh" : true});
+        
+        /*
+         * If we're not at our refresh limit, or we don't have one, just make
+         * another request.
+         */
+        } else {
+          createXHR(settings);
+        }
+      }, nextTimeout || frequency);
+    }
+  };
+
+  /*
+   * If we don't need to worry about a backoff function, go ahead and
+   * run `always`.
+   */
+  !backoff && always();
 }
 
 /**
@@ -232,10 +279,21 @@ function createXHR(settings) {
  */
 pltask = 'function () {'
 
-       + '  var globals  = {{GLOBALS}},'
-       + '      process  = {{PROCESS}},'
-       + '      refresh  = {{REFRESH}},'
-       + '      reqCount = 0;'
+       + '  var globals     = {{GLOBALS}},'
+       + '      process     = {{PROCESS}},'
+       + '      backoff     = {{BACKOFF}},'
+       + '      frequency   = {{FREQNCY}},'
+       + '      refresh     = {{REFRESH}},'
+       + '      haveRefresh = {{HAVEREF}},'
+       + '      reqCount    = 0,'
+       + '      prevFreq;'
+
+            /*
+             * Add a way to determine utf8 bytes size of responseText.
+             */
+       + '  function byteSize(s) {'
+       + '    return encodeURI(s).split(/%..|./).length - 1;'
+       + '  }'
 
             /*
              * Make sure ajax workers can use our stringify function.
@@ -411,7 +469,10 @@ function SFAP(settings) {
   worker       = secretary();
   specificTask = pltask.replace('{{GLOBALS}}', JSON.stringify(settings))
                        .replace('{{PROCESS}}', settings.process ? settings.process.toString() : 'null')
-                       .replace('{{REFRESH}}', settings.refresh ? settings.refresh : 100);
+                       .replace('{{BACKOFF}}', settings.backoff ? settings.backoff.toString() : 'null')
+                       .replace('{{FREQNCY}}', settings.frequency || 30000)
+                       .replace('{{REFRESH}}', settings.refresh ? settings.refresh : null)
+                       .replace('{{HAVEREF}}', String(typeof settings.refresh === 'number'));
 
   /*
    * Give the worker its job.
@@ -422,10 +483,12 @@ function SFAP(settings) {
    * Define a function for handling messages from the worker.
    */
   messageListener = function (msg) {
-    if (msg.data.result === 'refresh') {
+    var method;
+    if (msg.data.refresh === true) {
       this.refresh();
     } else {
-      this['on' + msg.data.result].forEach(function (callback) {
+      method = msg.data.success ? 'success' : 'error';
+      this['on' + method].forEach(function (callback) {
         callback(msg.data);
       });
       this.onmessage.forEach(function (callback) { callback(msg.data) });
@@ -436,7 +499,7 @@ function SFAP(settings) {
    * Define a funciton for handling errors from the worker.
    */
   errorListener = function (msg) {
-    var toPass = {"result" : "error", "response" : msg, "status" : -1};
+    var toPass = {"success" : false, "response" : msg, "status" : -1};
     this.onerror.forEach(function (callback) { callback(toPass) });
     this.onmessage.forEach(function (callback) { callback(toPass) });
   }.bind(this);
@@ -450,7 +513,6 @@ function SFAP(settings) {
     this.worker.postJob(this.task, true);
     this.worker.addListener('message', messageListener);
     this.worker.addListener('error', errorListener);
-    console.log('got here')
   };
 
   /*

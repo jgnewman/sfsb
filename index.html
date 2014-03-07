@@ -28,8 +28,11 @@
     // create a new ajax poller in a worker.
     var ajax = new SF.ajaxPoller({
       url: 'http://localhost:8080/index.html',
-      frequency: 3000,
-      refresh: 3,
+      //refresh: 3,
+      frequency: 2000,
+      backoff: function (data) {
+        return data.prevFreq + 1000;
+      },
 
       // the process function is run on the worker side and will
       // process the successful data before it gets passed back
@@ -40,7 +43,12 @@
 
     // when the ajax poller has data, it sends it back to us
     ajax.addEventListener('success', function (data) {
-      console.log('the ajax data was', data.response.replace(/\s+/g, '').slice(0, 50) + '...');
+      console.log('the success data was', data);
+    });
+
+    // when the ajax poller has data, it sends it back to us
+    ajax.addEventListener('error', function (data) {
+      console.log('the error data was', data);
     });
 
   </script>
