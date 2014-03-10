@@ -156,7 +156,8 @@ function createXHR(settings) {
    * Once the request has loaded...
    */
   req.addEventListener('load', function (evt) {
-    var status = parseInt(evt.srcElement.status);
+    var status = parseInt(evt.srcElement.status),
+        size   = byteSize(evt.srcElement.responseText);
 
     /*
      * Clear the timer.
@@ -165,16 +166,16 @@ function createXHR(settings) {
 
     /*
      * If the request status does not fall into the successful range,
-     * reject the promise.
+     * send back an error.
      */
-    if (status < 200 || status > 299) {
+    if (status < 200 || status > 299 || !size) {
       self.postMessage(resData = {"success"   : false,
                                   "response"  : evt.srcElement.responseText,
                                   "status"    : evt.srcElement.status,
                                   "prevFreq"  : prevFreq || 0,
                                   "duration"  : (+new Date) - duration,
                                   "sent"      : settings.data,
-                                  "utf8Bytes" : byteSize(evt.srcElement.responseText)});
+                                  "utf8Bytes" : size});
 
     /*
      * In the event of a good result, process that result and hand it back.
@@ -188,7 +189,7 @@ function createXHR(settings) {
                                   "prevFreq"  : prevFreq || 0,
                                   "duration"  : (+new Date) - duration,
                                   "sent"      : settings.data,
-                                  "utf8Bytes" : byteSize(evt.srcElement.responseText)});
+                                  "utf8Bytes" : size});
 
     }
 
