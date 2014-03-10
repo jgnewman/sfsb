@@ -3,7 +3,7 @@ Solid Fuel Socket Booster
 
 > A combination WebSocket, Ajax, and WebWorker library.
 
-SFSB supercharges a WebSockets and ajax server polling by running your code
+SFSB supercharges WebSockets and ajax server polling by running your code
 within a web worker and allowing you to process the data it hands you within
 that worker before sending the data back to the main thread.
 
@@ -29,14 +29,14 @@ good to go.
 4. Install dependencies: `gulp install`.
 5. Launch the live reload web server: `gulp server`.
 
-Whenever you're ready go generate the minified output, call `gulp distribute`.
+Whenever you're ready to generate the minified output, call `gulp distribute`.
 
 API
 ---
 
 SFSB is extremely convenient in that it does not require you to write any new
 JavaScript files in order to spawn your web worker. It takes care of all that
-for you using the magic of the `Blob` and `createObjectURL`. Essentially, you'll
+for you using the magic of `Blob`s and `createObjectURL`. Essentially, you'll
 never have to worry about interfacing with the web worker at all. Here's what
 you do instead:
 
@@ -208,7 +208,7 @@ var ajax = new SF.ajaxPoller({
 });
 ```
 
-In this case, every time a failed response comes back, our frequency function
+In this case, every time a failed response comes back, our backoff function
 will run. Within the data it receives is a value representing how long the
 worker waited before making the previous poll. So in the event of a failed
 response, we'll wait that long plus 5 additional seconds before making the
@@ -230,13 +230,13 @@ the response text.
 
 #### Refreshing
 
-Constant polling can be a taxing job. Even with incremental backoff, there are
+Constant polling can be a taxing job. Even with incremental backoff there are
 certain occasions where it is useful to clear out the memory accumulated by a
 polling mechanism and its associated call stack. That's what your `refresh`
 setting is for. If you would like, you can tell your ajax poller that after
 every X number of requests, the web worker should destroy itself, thus cleaning
 out memory and such, and then re-initialize itself with all of the same settings
-that were initially passed in. For example:
+that were previously passed in. For example:
 
 ```javascript
 var ajax = new SF.ajaxPoller({
@@ -257,10 +257,10 @@ spin up another web worker with all the same settings to take its place.
 
 The implication there is that your new worker will also have a request limit
 set to 100 so that the refreshing cycle can continue. It is also important to
-note that the event listener you created in connection with your original worker
-now automatically applies to your new worker instead. Again, this is an instance
-where you shouldn't have to think about the worker at all, just the polling
-that takes place.
+note that all event listeners you created in connection with your original
+worker now automatically apply to your new worker instead. Again, this is an
+instance where you shouldn't have to think about the worker at all, just the
+polling that takes place.
 
 #### Updating
 
@@ -314,14 +314,19 @@ to update only half way through the delay, a request will be made immediately
 but unless the response comes back successfully, it will still be 30 more
 seconds before the next request is made.
 
+### Shutting It Down
 
-TODO
-----
+For both WebSockets and ajax pollers, SFSB gives you a method called `.close`
+that you can use to gently but reliably shut down your socket/poll worker and
+thereby sever any connections related to it.
 
-- Maybe add ways to revive dead sockets and ajax workers
+```
+var sock = new SF.socketBooster('ws://echo.websocket.org');
+var ajax = new SF.ajaxPoller({url: 'http://www.example.com'});
 
-
-
+sock.close();
+ajax.close();
+```
 
 
 

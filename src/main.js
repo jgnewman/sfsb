@@ -597,7 +597,7 @@ SFAP.prototype = {
    * Close the worker and by extension, kill the ajax.
    */
   "close" : function () {
-    this.worker.close();
+    this.worker.end();
     return this;
   },
 
