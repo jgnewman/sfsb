@@ -28,7 +28,7 @@
     // create a new ajax poller in a worker.
     var ajax = new SF.ajaxPoller({
       url: 'http://localhost:8080/index.html',
-      //refresh: 3,
+      refresh: 5,
       frequency: 2000,
       backoff: function (data) {
         return data.prevFreq + 1000;
@@ -50,6 +50,11 @@
     ajax.addEventListener('error', function (data) {
       console.log('the error data was', data);
     });
+
+    // update the query parameters and immediately request again
+    setTimeout(function () {
+      ajax.update({foo: 'bar'});
+    }, 5000);
 
   </script>
 </body>

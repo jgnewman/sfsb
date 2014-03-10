@@ -224,6 +224,7 @@ your success, error, and message listeners:
 - `status` - _Number._ The xhr status code.
 - `prevFreq` - _Number._ The length of the delay before making this request.
 - `duration` - _Number._ The amount of time it took for the request to complete.
+- `sent` - _Object._ The data that was sent to the server on this request.
 - `utf8Bytes` - _Number._ Assuming the response text is utf-8, the byte size of
 the response text.
 
@@ -261,11 +262,62 @@ now automatically applies to your new worker instead. Again, this is an instance
 where you shouldn't have to think about the worker at all, just the polling
 that takes place.
 
+#### Updating
+
+In some cases it's a good idea to modify your polling request as opposed to
+creating multiple requests and this is especially true when dealing with web
+workers. Imagine, for example, that you have an application that draws three
+graphs on a page and therefore queries the server for data related to each of
+your three graphs. Now imagine that your end user has the ability to hide or
+show any of these three graphs at will. To reduce the server's load, you may
+decide that while certain elements are invisible, you don't need to poll the
+server for their data.
+
+What updating essentially means, then, is that you will want to be able to
+update the query parameters sent to the server and make your next query
+immediately rather than waiting for the current polling delay to complete.
+
+The way you do that in this case is as follows:
+
+```javascript
+var ajax = new SF.ajaxPoller({
+  url: 'http://www.example.com',
+  frequency: 2000,
+  data: {foo: 'bar'}
+});
+
+setTimeout(function () {
+  ajax.update({foo: 'bar', baz: 'quux'});
+}, 5000);
+```
+
+Calling `.update` within context of a `setTimeout` is not necessary. It is shown
+that way here to help explain what's going on.
+
+In this case we set up an ajax poller to run every 2 seconds. Each time it runs,
+it will send our `data` object to the server. Because our timer is set to 5
+seconds, our original poll will run unmodified 3 times at 2 second intervals.
+1 second after that third request, our timeout will expire and the data we are
+sending to the server will be updated. Normally, the ajax poller would wait 1
+more second before making the subsequent poll. However, since the request has
+been updated, the next request is made immediately, and after that, it will be
+2 more seconds before another request is made. After updating the poller, every
+subsequent request will send the updated data to the server, even if the
+worker is refreshed.
+
+Note that if you have a backoff calculation in place, a request will still be
+made immediately after updating the poller. However, unless a successful
+response comes back from the server, your backoff calculation will remain
+otherwise unaffected. For example, if your backoff calculation has gotten you
+to the point that you are polling the server every 30 seconds and you decide
+to update only half way through the delay, a request will be made immediately
+but unless the response comes back successfully, it will still be 30 more
+seconds before the next request is made.
+
 
 TODO
 ----
 
-- Way to modify polling request data
 - Test with the minified file
 - Maybe add ways to revive dead sockets and ajax workers
 

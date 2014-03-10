@@ -147,6 +147,7 @@ function createXHR(settings) {
                                 "status"    : xhr.status,
                                 "prevFreq"  : prevFreq || 0,
                                 "duration"  : (+new Date) - duration,
+                                "sent"      : settings.data,
                                 "utf8Bytes" : 0});
     always(resData);
   }, 10000 || settings.timeout || req.timeout);
@@ -172,6 +173,7 @@ function createXHR(settings) {
                                   "status"    : evt.srcElement.status,
                                   "prevFreq"  : prevFreq || 0,
                                   "duration"  : (+new Date) - duration,
+                                  "sent"      : settings.data,
                                   "utf8Bytes" : byteSize(evt.srcElement.responseText)});
 
     /*
@@ -185,6 +187,7 @@ function createXHR(settings) {
                                   "status"    : evt.srcElement.status,
                                   "prevFreq"  : prevFreq || 0,
                                   "duration"  : (+new Date) - duration,
+                                  "sent"      : settings.data,
                                   "utf8Bytes" : byteSize(evt.srcElement.responseText)});
 
     }
@@ -203,6 +206,7 @@ function createXHR(settings) {
                                 "status"    : evt.srcElement.status,
                                 "prevFreq"  : prevFreq || 0,
                                 "duration"  : (+new Date) - duration,
+                                "sent"      : settings.data,
                                 "utf8Bytes" : byteSize(evt.srcElement.responseText)});
     always(resData);
   });
@@ -212,6 +216,7 @@ function createXHR(settings) {
    * use that data for a backoff function.
    */
   always = function (responseData) {
+    var nextReq, delay, subscriber;
 
     /*
      * If we are currently doing a polling request...
@@ -225,7 +230,10 @@ function createXHR(settings) {
       haveRefresh && (reqCount += 1);
 
       /*
-       * Determine how long to wait before polling again.
+       * Determine how long to wait before polling again when we have data
+       * to pass and a backoff function that can be run.
+       * If this wasn't a successful request, calculate based on the backoff,
+       * otherwise just use the user-specified frequency.
        */
       if (responseData && backoff) {
         if (responseData.success) {
@@ -240,7 +248,8 @@ function createXHR(settings) {
        * every so often so, if this wasn't a PUT/POST/DELETE, countdown
        * and then make another request.
        */
-      return setTimeout(function () {
+      nextReq = function () {
+        unsubscribe(subscriber);
 
         /*
          * If we make it to our
@@ -249,16 +258,34 @@ function createXHR(settings) {
          * started up again.
          */
         if (haveRefresh && reqCount >= refresh) {
-          self.postMessage({"refresh" : true});
+          self.postMessage({"refresh" : true, "params" : settings.data});
         
         /*
          * If we're not at our refresh limit, or we don't have one, just make
          * another request.
          */
         } else {
-          createXHR(settings);
+          createXHR(globals);
         }
-      }, nextTimeout || frequency);
+      };
+
+      /*
+       * Delay should be a calculated next timeout if we have one or the
+       * user-specified frequency if not.
+       */
+      delay = setTimeout(nextReq, nextTimeout || frequency);
+
+      /*
+       * If the user updates polling parameters, this function
+       * will run. It will clear any current related timeout and immediately
+       * make the new request instead.
+       */
+      subscriber = function () {
+        clearTimeout(delay);
+        unsubscribe(subscriber);
+        nextReq();
+      };
+      subscribe(subscriber);
     }
   };
 
@@ -286,6 +313,7 @@ pltask = 'function () {'
        + '      refresh     = {{REFRESH}},'
        + '      haveRefresh = {{HAVEREF}},'
        + '      reqCount    = 0,'
+       + '      subs        = [],'
        + '      prevFreq;'
 
             /*
@@ -294,6 +322,10 @@ pltask = 'function () {'
        + '  function byteSize(s) {'
        + '    return encodeURI(s).split(/%..|./).length - 1;'
        + '  }'
+
+       + ' function subscribe(fn) { subs.push(fn) }'
+       + ' function unsubscribe(fn) { subs.splice(subs.indexOf(fn), 1) }'
+       + ' function update() { subs.forEach(function (each) { each() }) }'
 
             /*
              * Make sure ajax workers can use our stringify function.
@@ -315,6 +347,11 @@ pltask = 'function () {'
              * `msg` should be a settings object.
              */
        + '  return function (msg) {'
+       + '    if (msg.type === "UPDATE") {'
+       + '      globals.data = msg.params;'
+       + '      update();'
+       + '      return;'
+       + '    }'
        + '    msg.url = globals.url;'
        + '    !msg.timeout && (msg.timeout = globals.timeout);'
        + '    !msg.headers && (msg.headers = globals.headers);'
@@ -437,6 +474,22 @@ SFSB.prototype = {
 };
 
 /**
+ * Plugs in the necessary values to create a poll task.
+ *
+ * @param {Object} settings - See `settings` for the SFAP constructor.
+ *
+ * @returns {String} - The completed task string.
+ */
+function completePollTask(settings) {
+  return pltask.replace('{{GLOBALS}}', JSON.stringify(settings))
+               .replace('{{PROCESS}}', settings.process ? settings.process.toString() : 'null')
+               .replace('{{BACKOFF}}', settings.backoff ? settings.backoff.toString() : 'null')
+               .replace('{{FREQNCY}}', settings.frequency || 30000)
+               .replace('{{REFRESH}}', settings.refresh ? settings.refresh : null)
+               .replace('{{HAVEREF}}', String(typeof settings.refresh === 'number'));
+}
+
+/**
  * @constructor
  *
  * Creates an object for polling a server inside a Web Worker:
@@ -467,12 +520,7 @@ function SFAP(settings) {
    * Create a worker and its associated task.
    */
   worker       = secretary();
-  specificTask = pltask.replace('{{GLOBALS}}', JSON.stringify(settings))
-                       .replace('{{PROCESS}}', settings.process ? settings.process.toString() : 'null')
-                       .replace('{{BACKOFF}}', settings.backoff ? settings.backoff.toString() : 'null')
-                       .replace('{{FREQNCY}}', settings.frequency || 30000)
-                       .replace('{{REFRESH}}', settings.refresh ? settings.refresh : null)
-                       .replace('{{HAVEREF}}', String(typeof settings.refresh === 'number'));
+  specificTask = completePollTask(settings);
 
   /*
    * Give the worker its job.
@@ -485,7 +533,7 @@ function SFAP(settings) {
   messageListener = function (msg) {
     var method;
     if (msg.data.refresh === true) {
-      this.refresh();
+      this.refresh(msg.data.params);
     } else {
       method = msg.data.success ? 'success' : 'error';
       this['on' + method].forEach(function (callback) {
@@ -507,7 +555,9 @@ function SFAP(settings) {
   /*
    * Define a function for refreshing a worker.
    */
-  this.refresh = function () {
+  this.refresh = function (currentParams) {
+    settings.data = currentParams;
+    this.task = completePollTask(settings);
     this.worker.end();
     this.worker = secretary();
     this.worker.postJob(this.task, true);
@@ -557,8 +607,8 @@ SFAP.prototype = {
    * settings may be overwritten.
    */
   "post" : function (settings) {
-    msg.type = 'POST';
-    this.worker.postMessage(msg);
+    settings.type = 'POST';
+    this.worker.postMessage(settings);
     return this;
   },
 
@@ -568,8 +618,8 @@ SFAP.prototype = {
    * settings may be overwritten.
    */
   "put" : function (settings) {
-    msg.type = 'PUT';
-    this.worker.postMessage(msg);
+    settings.type = 'PUT';
+    this.worker.postMessage(settings);
     return this;
   },
 
@@ -579,8 +629,17 @@ SFAP.prototype = {
    * settings may be overwritten.
    */
   "del" : function (settings) {
-    msg.type = 'DELETE';
-    this.worker.postMessage(msg);
+    settings.type = 'DELETE';
+    this.worker.postMessage(settings);
+    return this;
+  },
+
+  /**
+   * Update the query parameters of a GET poll and immediately make the
+   * request again.
+   */
+  "update" : function (paramObj) {
+    this.worker.postMessage({"type" : "UPDATE", "params" : paramObj});
     return this;
   },
 
