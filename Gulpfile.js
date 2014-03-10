@@ -32,7 +32,11 @@ gulp.task('scripts', function () {
  */
 gulp.task('distribute', function () {
   gulp.src('./dist/sfsb.js')
-      .pipe(uglify())
+      // We can not mangle names in this case because the web worker
+      // creation technique stringifies functions and compiles them
+      // together. If their respective names get mangled, closure
+      // data will become non-accessible.
+      .pipe(uglify({mangle: false}))
       .pipe(concat('sfsb.min.js'))
       .pipe(gulp.dest('./dist/'));
 });

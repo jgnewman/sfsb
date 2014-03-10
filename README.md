@@ -318,7 +318,6 @@ seconds before the next request is made.
 TODO
 ----
 
-- Test with the minified file
 - Maybe add ways to revive dead sockets and ajax workers
 
 
