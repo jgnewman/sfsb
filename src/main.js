@@ -290,11 +290,6 @@ function createXHR(settings) {
     }
   };
 
-  /*
-   * If we don't need to worry about a backoff function, go ahead and
-   * run `always`.
-   */
-  !backoff && always();
 }
 
 /**
