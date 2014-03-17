@@ -144,7 +144,7 @@ function createXHR(settings) {
     req.abort();
     self.postMessage(resData = {"success"   : false,
                                 "response"  : "timeout",
-                                "status"    : xhr.status,
+                                "status"    : req.status,
                                 "prevFreq"  : prevFreq || 0,
                                 "duration"  : (+new Date) - duration,
                                 "sent"      : settings.data,
