@@ -79,17 +79,38 @@ function stringify(data) {
  * @key {Object} headers   - Defaults to native defaults. Should
  *                           be in the format of {contentType: 'text/plain'}
  *
+ * @param {Request} prevRequest - The previous request object. Used by recursion.
+ *
  * @returns {undefined}
  */
-function createXHR(settings) {
-  var req    = new XMLHttpRequest(),
-      method = (settings.type ? settings.type.toUpperCase() : 'GET'),
-      duration,
-      always,
+function createXHR(settings, prevRequest) {
+  var method = (settings.type ? settings.type.toUpperCase() : 'GET'),
+      req,
       nextTimeout,
       url,
       data,
-      timer;
+      removeListeners;
+
+  /*
+   * Create a function for removing listeners.
+   */
+  removeListeners = function (req) {
+    if (req) {
+      req.removeEventListener('load');
+      req.removeEventListener('error');
+    }
+  };
+
+  /*
+   * Allow GC to collect obsolete requests.
+   */
+  wasUpdated && removeListeners(prevRequest);
+
+  /*
+   * Create an xhr or re-use the previous one.
+   */
+  req = (!prevRequest || wasUpdated) ? new XMLHttpRequest() : prevRequest;
+
 
   /*
    * Stringify any data being sent.
@@ -116,21 +137,25 @@ function createXHR(settings) {
   /*
    * Prepare the request to send encoded data.
    * Users will be able to override this.
+   * If we are reopening a previous request, this will have been done already.
    */
-  req.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+  (!prevRequest || wasUpdated) &&
+    req.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
 
   /*
    * Add user-supplied headers.
+   * If we are reopening a previous request, this will have been done already.
    */
-  Object.prototype.hasOwnProperty(settings, "headers") &&
-    Object.keys(settings.headers).forEach(function (key) {
-      req.setRequestHeader(key, settings.headers[key]);
-    });
+  (!prevRequest || wasUpdated) &&
+    Object.prototype.hasOwnProperty(settings, "headers") &&
+      Object.keys(settings.headers).forEach(function (key) {
+        req.setRequestHeader(key, settings.headers[key]);
+      });
 
   /*
    * Start counting request time.
    */
-  duration = +new Date;
+  req.duration = +new Date;
 
   /*
    * Send the request. Include data if appropriate.
@@ -140,29 +165,36 @@ function createXHR(settings) {
   /*
    * Initialize a timer so the request will die if it takes too long.
    */
-  timer = setTimeout(function () {
+  req.customTimer = setTimeout(function () {
     req.abort();
+
+    /*
+     * W3 says not to garbage collect request objects if they have listeners
+     * attached. Remove listeners so GC can do its job.
+     */
+    removeListeners(req);
     self.postMessage(resData = {"success"   : false,
                                 "response"  : "timeout",
                                 "status"    : req.status,
                                 "prevFreq"  : prevFreq || 0,
-                                "duration"  : (+new Date) - duration,
+                                "duration"  : (+new Date) - req.duration,
                                 "sent"      : settings.data,
                                 "utf8Bytes" : 0});
-    always(resData);
+    req.always(resData, true);
   }, 10000 || settings.timeout || req.timeout);
 
   /*
+   * If we are reopening a previous request, this will have been done already.
    * Once the request has loaded...
    */
-  req.addEventListener('load', function (evt) {
+  (!prevRequest || wasUpdated) && req.addEventListener('load', function (evt) {
     var status = parseInt(evt.srcElement.status),
         size   = byteSize(evt.srcElement.responseText);
 
     /*
      * Clear the timer.
      */
-    clearTimeout(timer);
+    clearTimeout(req.customTimer);
 
     /*
      * If the request status does not fall into the successful range,
@@ -173,7 +205,7 @@ function createXHR(settings) {
                                   "response"  : evt.srcElement.responseText,
                                   "status"    : evt.srcElement.status,
                                   "prevFreq"  : prevFreq || 0,
-                                  "duration"  : (+new Date) - duration,
+                                  "duration"  : (+new Date) - req.duration,
                                   "sent"      : settings.data,
                                   "utf8Bytes" : size});
 
@@ -187,39 +219,45 @@ function createXHR(settings) {
                                                   : evt.srcElement.responseText),
                                   "status"    : evt.srcElement.status,
                                   "prevFreq"  : prevFreq || 0,
-                                  "duration"  : (+new Date) - duration,
+                                  "duration"  : (+new Date) - req.duration,
                                   "sent"      : settings.data,
                                   "utf8Bytes" : size});
-
     }
 
-    always(resData);
+    req.always(resData);
+
   });
 
   /*
    * If the request errors out, clear the timer, send an error, and potentially
    * call a backoff function.
+   * If we are reopening a previous request, this will have been done already.
    */
-  req.addEventListener('error', function (evt) {
-    clearTimeout(timer);
+  (!prevRequest || wasUpdated) && req.addEventListener('error', function (evt) {
+    clearTimeout(req.customTimer);
     self.postMessage(resData = {"success"   : false,
                                 "response"  : evt.srcElement.responseText,
                                 "status"    : evt.srcElement.status,
                                 "prevFreq"  : prevFreq || 0,
-                                "duration"  : (+new Date) - duration,
+                                "duration"  : (+new Date) - req.duration,
                                 "sent"      : settings.data,
                                 "utf8Bytes" : byteSize(evt.srcElement.responseText)});
-    always(resData);
+    req.always(resData);
   });
 
   /*
    * Define a function we will run whenever a request returns if we need to
    * use that data for a backoff function.
+   * If we are reopening a previous request, this will have been done already.
+   *
+   * responseData = the data from the last request
+   * timeout = whether the last request ended in a timeout
    */
-  always = function (responseData) {
+  (!prevRequest || wasUpdated) && (req.always = function (responseData, timeout) {
     var nextReq, delay, subscriber;
 
     /*
+     * We will only continue polling if the method is GET
      * If we are currently doing a polling request...
      */
     if (method === 'GET') {
@@ -287,8 +325,14 @@ function createXHR(settings) {
         nextReq();
       };
       subscribe(subscriber);
+    
+    /*
+     * If the method was not GET, remove listeners to enable GC.
+     */
+    } else {
+      !timeout && removeListeners(req);
     }
-  };
+  });
 
 }
 
@@ -310,6 +354,7 @@ pltask = 'function () {'
        + '      haveRefresh = {{HAVEREF}},'
        + '      reqCount    = 0,'
        + '      subs        = [],'
+       + '      wasUpdated  = false,'
        + '      prevFreq;'
 
             /*
@@ -346,6 +391,7 @@ pltask = 'function () {'
        + '    if (msg.type === "UPDATE") {'
        + '      globals.data = msg.params;'
        + '      update();'
+       + '      wasUpdated = true;'
        + '      return;'
        + '    }'
        + '    msg.url = globals.url;'
@@ -657,3 +703,9 @@ global.SF = {
   "socketBooster" : SFSB,
   "ajaxPoller"    : SFAP
 };
+
+/*
+
+2. re-open a the same req object where possible
+
+*/
