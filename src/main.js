@@ -188,8 +188,9 @@ function createXHR(settings, prevRequest) {
    * Once the request has loaded...
    */
   (!prevRequest || wasUpdated) && req.addEventListener('load', function (evt) {
-    var status = parseInt(evt.srcElement.status),
-        size   = byteSize(evt.srcElement.responseText);
+    var src    = evt.srcElement || evt.target;
+        status = parseInt(src.status),
+        size   = byteSize(src.responseText);
 
     /*
      * Clear the timer.
@@ -202,8 +203,8 @@ function createXHR(settings, prevRequest) {
      */
     if (status < 200 || status > 299 || !size) {
       self.postMessage(resData = {"success"   : false,
-                                  "response"  : evt.srcElement.responseText,
-                                  "status"    : evt.srcElement.status,
+                                  "response"  : src.responseText,
+                                  "status"    : src.status,
                                   "prevFreq"  : prevFreq || 0,
                                   "duration"  : (+new Date) - req.duration,
                                   "sent"      : settings.data,
@@ -215,9 +216,9 @@ function createXHR(settings, prevRequest) {
     } else {
       self.postMessage(resData = {"success"   : true,
                                   "response"  : (process
-                                                  ? process(evt.srcElement.responseText)
-                                                  : evt.srcElement.responseText),
-                                  "status"    : evt.srcElement.status,
+                                                  ? process(src.responseText)
+                                                  : src.responseText),
+                                  "status"    : src.status,
                                   "prevFreq"  : prevFreq || 0,
                                   "duration"  : (+new Date) - req.duration,
                                   "sent"      : settings.data,
@@ -234,14 +235,15 @@ function createXHR(settings, prevRequest) {
    * If we are reopening a previous request, this will have been done already.
    */
   (!prevRequest || wasUpdated) && req.addEventListener('error', function (evt) {
+    var src = evt.srcElement || evt.target;
     clearTimeout(req.customTimer);
     self.postMessage(resData = {"success"   : false,
-                                "response"  : evt.srcElement.responseText,
-                                "status"    : evt.srcElement.status,
+                                "response"  : src.responseText,
+                                "status"    : src.status,
                                 "prevFreq"  : prevFreq || 0,
                                 "duration"  : (+new Date) - req.duration,
                                 "sent"      : settings.data,
-                                "utf8Bytes" : byteSize(evt.srcElement.responseText)});
+                                "utf8Bytes" : byteSize(src.responseText)});
     req.always(resData);
   });
 
@@ -412,40 +414,46 @@ pltask = 'function () {'
  * be sent back to our main thread. 
  */
 wstask = 'function () {'
+       +  'var socket, origSend, callback;'
+       +  'if (this.WebSocket) {'
 
             /*
              * Create a new WebSocket and track its original send method.
              */
-       + '  var socket   = new WebSocket({{SOCKETURL}}),'
-       + '      origSend = WebSocket.prototype.send,'
-       + '      callback = {{CALLBACK}};'
+       + '    socket   = new WebSocket({{SOCKETURL}});'
+       + '    origSend = WebSocket.prototype.send;'
+       + '    callback = {{CALLBACK}};'
        
             /*
              * Overwrite the send method to compensate for the potential race
              * conditions where sockets have to be asynchronously opened
              * before messages can be sent.
              */
-       + '  WebSocket.prototype.send = function (msg) {'
-       + '    if (this.readyState !== 1) {'
-       + '      return setTimeout(function () {this.send(msg)}.bind(this), 10);'
-       + '    }'
-       + '    return origSend.call(this, msg);'
-       + '  };'
+       + '    WebSocket.prototype.send = function (msg) {'
+       + '      if (this.readyState !== 1) {'
+       + '        return setTimeout(function () {this.send(msg)}.bind(this), 10);'
+       + '      }'
+       + '      return origSend.call(this, msg);'
+       + '    };'
 
             /*
              * When we get a message from the socket, process it and
              * pass it back to the user.
              */
-       + '  socket.onmessage = function (msg) {'
-       + '    self.postMessage(callback ? callback(msg.data) : msg.data);'
-       + '  };'
+       + '    socket.onmessage = function (msg) {'
+       + '      self.postMessage(callback ? callback(msg.data) : msg.data);'
+       + '    };'
       
             /*
              * When the user sends us a message, pass it along to the socket.
              */
-       + '  return function (msg) {'
-       + '    socket.send(msg);'
-       + '  };'
+       + '    return function (msg) {'
+       + '      socket.send(msg);'
+       + '    };'
+       + '  } else { '
+       + '    console.warn("Web Worker WebSockets are not available in this browser.");'
+       + '    return function () {};'
+       + '  }'
        + '}'
        ;
 
