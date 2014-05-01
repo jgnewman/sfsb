@@ -168,6 +168,7 @@ function createXHR(settings, prevRequest) {
    */
   req = (!prevRequest || wasUpdated) ? new XMLHttpRequest() : prevRequest;
 
+
   /*
    * Stringify any data being sent.
    */

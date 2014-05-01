@@ -121,7 +121,7 @@ function createXHR(settings, prevRequest) {
   /*
    * Add in the question mark for GET requests.
    */
-  method === 'GET' && (data = '?' + data);
+  method === 'GET' && data !== undefined && (data = '?' + data);
 
   /*
    * Attach query strings to the URL for a GET request.
